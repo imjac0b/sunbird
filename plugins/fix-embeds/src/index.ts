@@ -1,5 +1,5 @@
 // @description Rewrites X/Twitter, Instagram, TikTok, and custom links for working embeds
-// @version 1.2.1
+// @version 1.3.0
 // @author cmdr-chara
 
 const settings = phoenix.settings.define({
@@ -18,6 +18,7 @@ const settings = phoenix.settings.define({
       { value: "goyimx.com", label: "goyimx.com" },
       { value: "fxtwitter.com", label: "fxtwitter.com" },
       { value: "vxtwitter.com", label: "vxtwitter.com" },
+      { value: "fix.vg", label: "fix.vg" },
       { value: "custom", label: "Custom (use textbox below)" },
     ],
     default: "fixupx.com",
@@ -44,6 +45,7 @@ const settings = phoenix.settings.define({
       { value: "eeinstagram.com", label: "eeinstagram.com" },
       { value: "vxinstagram.com", label: "vxinstagram.com" },
       { value: "instagramez.com", label: "instagramez.com" },
+      { value: "fix.vg", label: "fix.vg" },
       { value: "custom", label: "Custom (use textbox below)" },
     ],
     default: "kkinstagram.com",
@@ -68,6 +70,7 @@ const settings = phoenix.settings.define({
       { value: "tnktok.com", label: "tnktok.com" },
       { value: "vxtiktok.com", label: "vxtiktok.com" },
       { value: "tfxktok.com", label: "tfxktok.com" },
+      { value: "fix.vg", label: "fix.vg" },
       { value: "custom", label: "Custom (use textbox below)" },
     ],
     default: "tnktok.com",
@@ -89,6 +92,8 @@ const settings = phoenix.settings.define({
 const TWITTER_HOST = /^(www\.|mobile\.)?(twitter\.com|x\.com)$/i;
 const INSTAGRAM_HOST = /^(www\.|m\.)?instagram\.com$/i;
 const TIKTOK_HOST = /^(www\.|m\.|vm\.|vt\.)?tiktok\.com$/i;
+
+const FIX_VG_HOST = /^([a-z0-9-]+\.)*fix\.vg$/i;
 
 const cleanHost = (value: string) =>
   value
@@ -116,22 +121,29 @@ const parseCustomRules = (): [string, string][] => {
   return rules;
 };
 
-const rewriteHost = (host: string, customRules: [string, string][]): string | null => {
+type Rewrite = { kind: "host"; host: string } | { kind: "prefix"; base: string };
+
+const toRewrite = (target: string, swapped: string): Rewrite =>
+  FIX_VG_HOST.test(target) ? { kind: "prefix", base: target.toLowerCase() } : { kind: "host", host: swapped };
+
+const rewriteHost = (host: string, customRules: [string, string][]): Rewrite | null => {
   if (settings.twitter && TWITTER_HOST.test(host)) {
-    return pickDomain(settings.customTwitterDomain, settings.twitterDomain, "fixupx.com");
+    const target = pickDomain(settings.customTwitterDomain, settings.twitterDomain, "fixupx.com");
+    return toRewrite(target, target);
   }
   if (settings.instagram && INSTAGRAM_HOST.test(host)) {
-    return pickDomain(settings.customInstagramDomain, settings.instagramDomain, "kkinstagram.com");
+    const target = pickDomain(settings.customInstagramDomain, settings.instagramDomain, "kkinstagram.com");
+    return toRewrite(target, target);
   }
   if (settings.tiktok && TIKTOK_HOST.test(host)) {
     const target = pickDomain(settings.customTiktokDomain, settings.tiktokDomain, "tnktok.com");
     const sub = /^(vm\.|vt\.)/i.exec(host)?.[1]?.toLowerCase() ?? "";
-    return `${sub}${target}`;
+    return toRewrite(target, `${sub}${target}`);
   }
   const lower = host.toLowerCase();
   const bare = lower.replace(/^(www\.|m\.|mobile\.)/, "");
   for (const [from, to] of customRules) {
-    if (lower === from || bare === from) return to;
+    if (lower === from || bare === from) return { kind: "host", host: to };
   }
   return null;
 };
@@ -142,7 +154,10 @@ const fix = (text: string) => {
     const match = /^https?:\/\/([^/?#:]+)/i.exec(url);
     if (!match) return url;
     const next = rewriteHost(match[1], customRules);
-    return next ? url.replace(match[1], next) : url;
+    if (!next) return url;
+    if (next.kind === "host") return url.replace(match[1], next.host);
+    // fix.vg takes the original link after its own host: fix.vg/x.com/user/status/1
+    return `https://${next.base}/${url.replace(/^https?:\/\//i, "")}`;
   });
 };
 
